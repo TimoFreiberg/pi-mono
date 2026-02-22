@@ -1409,44 +1409,110 @@ export class Editor implements Component, Focusable {
 
 	private moveToLineStart(): void {
 		this.lastAction = null;
-		this.setCursorCol(0);
+		const visualLines = this.buildVisualLineMap(this.lastWidth);
+		const currentVLIndex = this.findCurrentVisualLine(visualLines);
+		const currentVL = visualLines[currentVLIndex];
+		if (!currentVL) {
+			this.setCursorCol(0);
+			return;
+		}
+
+		const visualLineStart = currentVL.startCol;
+
+		if (this.state.cursorCol > visualLineStart) {
+			// Move to start of current visual line
+			this.setCursorCol(visualLineStart);
+		} else if (currentVLIndex > 0) {
+			// Already at start of current visual line — move to start of previous visual line
+			const prevVL = visualLines[currentVLIndex - 1]!;
+			this.state.cursorLine = prevVL.logicalLine;
+			this.setCursorCol(prevVL.startCol);
+		}
+		// else: already at very first visual line, stay put
 	}
 
 	private moveToLineEnd(): void {
 		this.lastAction = null;
-		const currentLine = this.state.lines[this.state.cursorLine] || "";
-		this.setCursorCol(currentLine.length);
+		const visualLines = this.buildVisualLineMap(this.lastWidth);
+		const currentVLIndex = this.findCurrentVisualLine(visualLines);
+		const currentVL = visualLines[currentVLIndex];
+		if (!currentVL) {
+			const currentLine = this.state.lines[this.state.cursorLine] || "";
+			this.setCursorCol(currentLine.length);
+			return;
+		}
+
+		const isLastSegment =
+			currentVLIndex === visualLines.length - 1 ||
+			visualLines[currentVLIndex + 1]?.logicalLine !== currentVL.logicalLine;
+		// For non-last segments, the cursor position at startCol+length is visually on the next
+		// visual line, so the "end" of this visual line for cursor positioning is length-1.
+		const visualLineEnd = isLastSegment
+			? currentVL.startCol + currentVL.length
+			: currentVL.startCol + Math.max(0, currentVL.length - 1);
+
+		if (this.state.cursorCol < visualLineEnd) {
+			// Move to end of current visual line
+			this.setCursorCol(visualLineEnd);
+		} else if (currentVLIndex < visualLines.length - 1) {
+			// Already at end of current visual line — move to end of next visual line
+			const nextVL = visualLines[currentVLIndex + 1]!;
+			const nextIsLastSegment =
+				currentVLIndex + 1 === visualLines.length - 1 ||
+				visualLines[currentVLIndex + 2]?.logicalLine !== nextVL.logicalLine;
+			const nextVisualLineEnd = nextIsLastSegment
+				? nextVL.startCol + nextVL.length
+				: nextVL.startCol + Math.max(0, nextVL.length - 1);
+			this.state.cursorLine = nextVL.logicalLine;
+			this.setCursorCol(nextVisualLineEnd);
+		}
+		// else: already at very last visual line, stay put
 	}
 
 	private deleteToStartOfLine(): void {
 		this.historyIndex = -1; // Exit history browsing mode
 
+		const visualLines = this.buildVisualLineMap(this.lastWidth);
+		const currentVLIndex = this.findCurrentVisualLine(visualLines);
+		const currentVL = visualLines[currentVLIndex];
 		const currentLine = this.state.lines[this.state.cursorLine] || "";
 
-		if (this.state.cursorCol > 0) {
+		if (currentVL && this.state.cursorCol > currentVL.startCol) {
+			// Delete from visual line start to cursor
 			this.pushUndoSnapshot();
-
-			// Calculate text to be deleted and save to kill ring (backward deletion = prepend)
-			const deletedText = currentLine.slice(0, this.state.cursorCol);
+			const deletedText = currentLine.slice(currentVL.startCol, this.state.cursorCol);
 			this.killRing.push(deletedText, { prepend: true, accumulate: this.lastAction === "kill" });
 			this.lastAction = "kill";
+			this.state.lines[this.state.cursorLine] =
+				currentLine.slice(0, currentVL.startCol) + currentLine.slice(this.state.cursorCol);
+			this.setCursorCol(currentVL.startCol);
+		} else if (currentVL && currentVLIndex > 0) {
+			const prevVL = visualLines[currentVLIndex - 1]!;
 
-			// Delete from start of line up to cursor
-			this.state.lines[this.state.cursorLine] = currentLine.slice(this.state.cursorCol);
-			this.setCursorCol(0);
-		} else if (this.state.cursorLine > 0) {
-			this.pushUndoSnapshot();
+			if (prevVL.logicalLine === this.state.cursorLine) {
+				// At visual line start within a wrapped logical line — reposition cursor
+				// to end of previous visual line (no deletion)
+				const prevIsLastSegment =
+					currentVLIndex - 1 === visualLines.length - 1 ||
+					visualLines[currentVLIndex]?.logicalLine !== prevVL.logicalLine;
+				const prevEnd = prevIsLastSegment
+					? prevVL.startCol + prevVL.length
+					: prevVL.startCol + Math.max(0, prevVL.length - 1);
+				this.setCursorCol(prevEnd);
+			} else {
+				// At start of logical line — delete just the \n, merge with previous line
+				this.pushUndoSnapshot();
+				this.killRing.push("\n", { prepend: true, accumulate: this.lastAction === "kill" });
+				this.lastAction = "kill";
 
-			// At start of line - merge with previous line, treating newline as deleted text
-			this.killRing.push("\n", { prepend: true, accumulate: this.lastAction === "kill" });
-			this.lastAction = "kill";
-
-			const previousLine = this.state.lines[this.state.cursorLine - 1] || "";
-			this.state.lines[this.state.cursorLine - 1] = previousLine + currentLine;
-			this.state.lines.splice(this.state.cursorLine, 1);
-			this.state.cursorLine--;
-			this.setCursorCol(previousLine.length);
+				const previousLine = this.state.lines[this.state.cursorLine - 1] || "";
+				this.state.lines[this.state.cursorLine - 1] = previousLine + currentLine;
+				this.state.lines.splice(this.state.cursorLine, 1);
+				this.state.cursorLine--;
+				this.setCursorCol(previousLine.length);
+			}
 		}
+		// else: at very first visual line start, nothing to delete
 
 		if (this.onChange) {
 			this.onChange(this.getText());
@@ -1456,29 +1522,49 @@ export class Editor implements Component, Focusable {
 	private deleteToEndOfLine(): void {
 		this.historyIndex = -1; // Exit history browsing mode
 
+		const visualLines = this.buildVisualLineMap(this.lastWidth);
+		const currentVLIndex = this.findCurrentVisualLine(visualLines);
+		const currentVL = visualLines[currentVLIndex];
 		const currentLine = this.state.lines[this.state.cursorLine] || "";
 
-		if (this.state.cursorCol < currentLine.length) {
-			this.pushUndoSnapshot();
+		// Compute the end position of the current visual line for deletion.
+		// Unlike cursor positioning (where non-last segment end is length-1),
+		// for deletion we always delete up to startCol+length since that text
+		// belongs to this visual line segment.
+		let visualLineEnd: number;
+		if (currentVL) {
+			visualLineEnd = currentVL.startCol + currentVL.length;
+		} else {
+			visualLineEnd = currentLine.length;
+		}
 
-			// Calculate text to be deleted and save to kill ring (forward deletion = append)
-			const deletedText = currentLine.slice(this.state.cursorCol);
+		if (this.state.cursorCol < visualLineEnd) {
+			// Delete from cursor to end of current visual line
+			this.pushUndoSnapshot();
+			const deletedText = currentLine.slice(this.state.cursorCol, visualLineEnd);
 			this.killRing.push(deletedText, { prepend: false, accumulate: this.lastAction === "kill" });
 			this.lastAction = "kill";
+			this.state.lines[this.state.cursorLine] =
+				currentLine.slice(0, this.state.cursorCol) + currentLine.slice(visualLineEnd);
+		} else if (currentVLIndex < visualLines.length - 1) {
+			const nextVL = visualLines[currentVLIndex + 1]!;
 
-			// Delete from cursor to end of line
-			this.state.lines[this.state.cursorLine] = currentLine.slice(0, this.state.cursorCol);
-		} else if (this.state.cursorLine < this.state.lines.length - 1) {
-			this.pushUndoSnapshot();
+			if (nextVL.logicalLine === this.state.cursorLine) {
+				// At visual line end within a wrapped logical line — reposition cursor
+				// to start of next visual line (no deletion)
+				this.setCursorCol(nextVL.startCol);
+			} else {
+				// At end of logical line — delete just the \n, merge with next line
+				this.pushUndoSnapshot();
+				this.killRing.push("\n", { prepend: false, accumulate: this.lastAction === "kill" });
+				this.lastAction = "kill";
 
-			// At end of line - merge with next line, treating newline as deleted text
-			this.killRing.push("\n", { prepend: false, accumulate: this.lastAction === "kill" });
-			this.lastAction = "kill";
-
-			const nextLine = this.state.lines[this.state.cursorLine + 1] || "";
-			this.state.lines[this.state.cursorLine] = currentLine + nextLine;
-			this.state.lines.splice(this.state.cursorLine + 1, 1);
+				const nextLine = this.state.lines[this.state.cursorLine + 1] || "";
+				this.state.lines[this.state.cursorLine] = currentLine + nextLine;
+				this.state.lines.splice(this.state.cursorLine + 1, 1);
+			}
 		}
+		// else: at very last visual line end, nothing to delete
 
 		if (this.onChange) {
 			this.onChange(this.getText());

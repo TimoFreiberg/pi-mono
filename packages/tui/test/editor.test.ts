@@ -1328,9 +1328,8 @@ describe("Editor component", () => {
 			editor.handleInput("\n");
 			editor.handleInput("c");
 			editor.handleInput("d");
-			// Move to end of first line
-			editor.handleInput("\x1b[A"); // Up arrow
-			editor.handleInput("\x05"); // Ctrl+E - end of line
+			// Move to end of first line using Up + arrows (not Ctrl+E which is progressive)
+			editor.handleInput("\x1b[A"); // Up arrow - line 0, col 2 (end of "ab")
 
 			// Now at end of "ab", Ctrl+K should delete newline (merge with "cd")
 			editor.handleInput("\x0b"); // Ctrl+K - deletes newline
@@ -1434,9 +1433,8 @@ describe("Editor component", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 
 			editor.setText("line1\nline2");
-			// Move to start of document, then to end of first line
-			editor.handleInput("\x1b[A"); // Up arrow - go to first line
-			editor.handleInput("\x05"); // Ctrl+E - end of line
+			// Position cursor at end of first line: Up from end of line2 → line 0, col 5
+			editor.handleInput("\x1b[A"); // Up arrow - go to first line, col 5 (end of "line1")
 
 			editor.handleInput("\x1bd"); // Alt+D - deletes newline (merges lines)
 			assert.strictEqual(editor.getText(), "line1line2");
@@ -2987,19 +2985,20 @@ describe("Editor component", () => {
 			editor.setText("1234567890\n\n1234567890");
 
 			// Start at line 2, col 8
-			editor.handleInput("\x01"); // Ctrl+A
+			// Ctrl+A goes to start of visual line (line 2, col 0)
+			editor.handleInput("\x01"); // Ctrl+A → line 2, col 0
 			for (let i = 0; i < 8; i++) editor.handleInput("\x1b[C");
 
 			// Move up - establishes sticky col 8
 			editor.handleInput("\x1b[A"); // Up - line 1, col 0
 
-			// Ctrl+A - resets sticky column to 0
+			// Ctrl+A - already at start of empty line, progressive → goes to line 0, col 0
 			editor.handleInput("\x01"); // Ctrl+A
-			assert.deepStrictEqual(editor.getCursor(), { line: 1, col: 0 });
-
-			// Move up
-			editor.handleInput("\x1b[A"); // Up - line 0, col 0 (new sticky from col 0)
 			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 0 });
+
+			// Move down - sticky column was reset to 0
+			editor.handleInput("\x1b[B"); // Down - line 1, col 0
+			assert.deepStrictEqual(editor.getCursor(), { line: 1, col: 0 });
 		});
 
 		it("resets sticky column on Ctrl+E (move to line end)", () => {
@@ -3829,6 +3828,262 @@ describe("Editor component", () => {
 			editor.handleInput("\r");
 
 			assert.strictEqual(submitted, pastedText);
+		});
+	});
+
+	describe("Visual line cursorLineStart/cursorLineEnd", () => {
+		// Helper: create editor with a specific layout width.
+		// render(width) sets lastWidth = width - 1 (no padding).
+		// So render(11) → lastWidth = 10, meaning lines wrap at 10 chars.
+		function createEditorWithWidth(width: number): Editor {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.render(width);
+			return editor;
+		}
+
+		// Move cursor to a specific position
+		function setCursorTo(editor: Editor, line: number, col: number): void {
+			editor.handleInput("\x01"); // Ctrl+A to go to start
+			// Go to line 0 col 0 by pressing Ctrl+A until at start
+			while (editor.getCursor().line > 0 || editor.getCursor().col > 0) {
+				editor.handleInput("\x01");
+			}
+			// Move to target line
+			for (let i = 0; i < line; i++) {
+				editor.handleInput("\x1b[B"); // Down
+			}
+			// Move to target col
+			for (let i = 0; i < col; i++) {
+				editor.handleInput("\x1b[C"); // Right
+			}
+		}
+
+		it("cursorLineStart on non-wrapped line goes to col 0", () => {
+			const editor = createEditorWithWidth(81); // lastWidth = 80
+			editor.setText("hello world");
+			// Cursor is at end (line 0, col 11)
+			editor.handleInput("\x01"); // Ctrl+A
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 0 });
+		});
+
+		it("cursorLineEnd on non-wrapped line goes to end", () => {
+			const editor = createEditorWithWidth(81);
+			editor.setText("hello world");
+			setCursorTo(editor, 0, 0);
+			editor.handleInput("\x05"); // Ctrl+E
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 11 });
+		});
+
+		it("cursorLineStart goes to visual line start on wrapped line", () => {
+			// "abcdefghij klmno" with width 11 (lastWidth=10)
+			// Visual lines: "abcdefghij" (0-10), " klmno" (10-16)
+			const editor = createEditorWithWidth(11);
+			editor.setText("abcdefghij klmno");
+			// Cursor at end = line 0, col 16 (on visual line 2)
+			editor.handleInput("\x01"); // Ctrl+A → start of visual line 2
+			// The second visual line starts at col 10
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 10 });
+		});
+
+		it("cursorLineStart progressive: second press goes to previous visual line start", () => {
+			const editor = createEditorWithWidth(11);
+			editor.setText("abcdefghij klmno");
+			// Cursor at end (col 16, visual line 2)
+			editor.handleInput("\x01"); // First: go to start of visual line 2 (col 10)
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 10 });
+			editor.handleInput("\x01"); // Second: go to start of visual line 1 (col 0)
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 0 });
+		});
+
+		it("cursorLineStart stays put at first visual line of buffer", () => {
+			const editor = createEditorWithWidth(11);
+			editor.setText("abcdefghij klmno");
+			setCursorTo(editor, 0, 0);
+			editor.handleInput("\x01"); // Already at start
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 0 });
+		});
+
+		it("cursorLineEnd goes to visual line end on wrapped line", () => {
+			const editor = createEditorWithWidth(11);
+			editor.setText("abcdefghij klmno");
+			setCursorTo(editor, 0, 0);
+			editor.handleInput("\x05"); // Ctrl+E → end of visual line 1
+			// End of first visual line: col 9 (last char of segment, since non-last segment)
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 9 });
+		});
+
+		it("cursorLineEnd progressive: second press goes to next visual line end", () => {
+			const editor = createEditorWithWidth(11);
+			editor.setText("abcdefghij klmno");
+			setCursorTo(editor, 0, 0);
+			editor.handleInput("\x05"); // First: end of visual line 1 (col 9)
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 9 });
+			editor.handleInput("\x05"); // Second: end of visual line 2 (col 16)
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 16 });
+		});
+
+		it("cursorLineEnd stays put at last visual line of buffer", () => {
+			const editor = createEditorWithWidth(11);
+			editor.setText("abcdefghij klmno");
+			// Cursor at end (col 16)
+			editor.handleInput("\x05"); // Already at end of last visual line
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 16 });
+		});
+
+		it("cursorLineStart crosses logical line boundaries", () => {
+			const editor = createEditorWithWidth(81);
+			editor.setText("first\nsecond");
+			// Cursor at end of "second" (line 1, col 6)
+			editor.handleInput("\x01"); // Go to start of "second" (line 1, col 0)
+			assert.deepStrictEqual(editor.getCursor(), { line: 1, col: 0 });
+			editor.handleInput("\x01"); // Cross to start of "first" (line 0, col 0)
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 0 });
+		});
+
+		it("cursorLineEnd crosses logical line boundaries", () => {
+			const editor = createEditorWithWidth(81);
+			editor.setText("first\nsecond");
+			setCursorTo(editor, 0, 5); // End of "first"
+			editor.handleInput("\x05"); // Already at end of "first", cross to end of "second"
+			assert.deepStrictEqual(editor.getCursor(), { line: 1, col: 6 });
+		});
+
+		it("cursorLineStart crosses from wrapped logical line to previous logical line", () => {
+			const editor = createEditorWithWidth(11);
+			// Line 0: "abc" (one visual line)
+			// Line 1: "defghijklm nop" wraps into "defghijklm" and " nop"
+			editor.setText("abc\ndefghijklm nop");
+			// Cursor at start of second visual line of line 1 (col 10)
+			setCursorTo(editor, 1, 10);
+			editor.handleInput("\x01"); // Go to start of visual line (already at 10, which IS the start)
+			// Actually col 10 is start of second visual segment
+			// Let me re-check: with lastWidth=10, "defghijklm nop" (14 chars)
+			// wordWrapLine wraps: "defghijklm" (0-10), " nop" (10-14)
+			// So visual line starts: 0 and 10
+			// cursor at col 10 = start of second visual line
+			// Ctrl+A: already at start → go to prev visual line start
+			assert.deepStrictEqual(editor.getCursor(), { line: 1, col: 0 });
+			editor.handleInput("\x01"); // Now at start of "defghijklm" → go to prev = "abc" start
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 0 });
+		});
+	});
+
+	describe("Visual line deleteToLineStart/deleteToLineEnd", () => {
+		function createEditorWithWidth(width: number): Editor {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.render(width);
+			return editor;
+		}
+
+		function setCursorTo(editor: Editor, line: number, col: number): void {
+			editor.handleInput("\x01");
+			while (editor.getCursor().line > 0 || editor.getCursor().col > 0) {
+				editor.handleInput("\x01");
+			}
+			for (let i = 0; i < line; i++) editor.handleInput("\x1b[B");
+			for (let i = 0; i < col; i++) editor.handleInput("\x1b[C");
+		}
+
+		it("deleteToLineStart deletes to visual line start within wrapped line", () => {
+			const editor = createEditorWithWidth(11); // lastWidth=10
+			editor.setText("abcdefghij klmno");
+			// "abcdefghij" (0-10), " klmno" (10-16)
+			// Put cursor at col 13 (in " klmno", 3 chars into second visual line)
+			setCursorTo(editor, 0, 13);
+			editor.handleInput("\x15"); // Ctrl+U
+			// Should delete " kl" (cols 10-13), leaving "abcdefghijmno"
+			assert.strictEqual(editor.getText(), "abcdefghijmno");
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 10 });
+		});
+
+		it("deleteToLineStart progressive: at visual line start repositions to prev visual line end", () => {
+			const editor = createEditorWithWidth(11);
+			editor.setText("abcdefghij klmno");
+			setCursorTo(editor, 0, 10); // Start of second visual line
+			editor.handleInput("\x15"); // Ctrl+U — at visual line start within wrapped line, repositions
+			// No deletion, cursor moves to end of previous visual line (col 9)
+			assert.strictEqual(editor.getText(), "abcdefghij klmno");
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 9 });
+		});
+
+		it("deleteToLineStart at logical line start deletes just the newline", () => {
+			const editor = createEditorWithWidth(81);
+			editor.setText("first\nsecond");
+			setCursorTo(editor, 1, 0); // Start of "second"
+			editor.handleInput("\x15"); // At start of logical line → delete \n, merge
+			assert.strictEqual(editor.getText(), "firstsecond");
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 5 });
+		});
+
+		it("deleteToLineEnd deletes to visual line end within wrapped line", () => {
+			const editor = createEditorWithWidth(11);
+			editor.setText("abcdefghij klmno");
+			setCursorTo(editor, 0, 3); // col 3 in first visual line
+			editor.handleInput("\x0b"); // Ctrl+K
+			// Should delete "defghij" (cols 3-10), leaving "abc klmno"
+			assert.strictEqual(editor.getText(), "abc klmno");
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 3 });
+		});
+
+		it("deleteToLineEnd progressive: at visual line end repositions to next visual line start", () => {
+			const editor = createEditorWithWidth(11);
+			editor.setText("abcdefghij klmno");
+			// End of first visual line = col 9 (non-last segment, cursor end is length-1)
+			setCursorTo(editor, 0, 9);
+			// First Ctrl+K: cursor at col 9, visual line end at col 10 (deletion boundary).
+			// Deletes "j" (col 9 to 10)
+			editor.handleInput("\x0b"); // Ctrl+K
+			assert.strictEqual(editor.getText(), "abcdefghi klmno");
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 9 });
+			// Second Ctrl+K: now at visual line end again, within wrapped line → reposition
+			// No deletion, cursor moves to start of next visual line
+			editor.handleInput("\x0b"); // Ctrl+K — deletes to end of current visual line
+			// Actually after the first delete, the text is "abcdefghi klmno" (15 chars)
+			// With lastWidth=10, wraps as "abcdefghi " (0-10) and "klmno" (10-15)
+			// Cursor at col 9, visual line end at col 10 (deletion boundary)
+			// So it deletes " " (col 9-10)
+			assert.strictEqual(editor.getText(), "abcdefghiklmno");
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 9 });
+		});
+
+		it("deleteToLineEnd at logical line end deletes just the newline", () => {
+			const editor = createEditorWithWidth(81);
+			editor.setText("first\nsecond");
+			setCursorTo(editor, 0, 5); // End of "first"
+			editor.handleInput("\x0b"); // Ctrl+K — at end of logical line → delete \n, merge
+			assert.strictEqual(editor.getText(), "firstsecond");
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 5 });
+		});
+
+		it("deleteToLineStart does nothing at first visual line start", () => {
+			const editor = createEditorWithWidth(81);
+			editor.setText("hello");
+			setCursorTo(editor, 0, 0);
+			editor.handleInput("\x15"); // Ctrl+U
+			assert.strictEqual(editor.getText(), "hello");
+		});
+
+		it("deleteToLineEnd does nothing at last visual line end", () => {
+			const editor = createEditorWithWidth(81);
+			editor.setText("hello");
+			// Cursor at end
+			editor.handleInput("\x0b"); // Ctrl+K
+			assert.strictEqual(editor.getText(), "hello");
+		});
+
+		it("kill ring accumulates across consecutive visual line deletes", () => {
+			const editor = createEditorWithWidth(81);
+			editor.setText("first\nsecond\nthird");
+			setCursorTo(editor, 1, 3); // Middle of "second"
+			editor.handleInput("\x0b"); // Ctrl+K — deletes "ond"
+			assert.strictEqual(editor.getText(), "first\nsec\nthird");
+			editor.handleInput("\x0b"); // Ctrl+K — at end of "sec", deletes "\n" (logical line boundary)
+			assert.strictEqual(editor.getText(), "first\nsecthird");
+			editor.handleInput("\x0b"); // Ctrl+K — deletes "third"
+			assert.strictEqual(editor.getText(), "first\nsec");
+			// Accumulated kill: "ond" + "\n" + "third" = "ond\nthird"
+			editor.handleInput("\x19"); // Ctrl+Y
+			assert.strictEqual(editor.getText(), "first\nsecond\nthird");
 		});
 	});
 });
