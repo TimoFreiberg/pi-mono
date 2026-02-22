@@ -15,7 +15,7 @@ import { processFileArguments } from "./cli/file-processor.js";
 import { buildInitialMessage } from "./cli/initial-message.js";
 import { listModels } from "./cli/list-models.js";
 import { selectSession } from "./cli/session-picker.js";
-import { ENV_SESSION_DIR, expandTildePath, getAgentDir, VERSION } from "./config.js";
+import { COMMIT_HASH, ENV_SESSION_DIR, expandTildePath, getAgentDir, VERSION } from "./config.js";
 import { type CreateAgentSessionRuntimeFactory, createAgentSessionRuntime } from "./core/agent-session-runtime.js";
 import {
 	type AgentSessionRuntimeDiagnostic,
@@ -454,7 +454,8 @@ export async function main(args: string[], options?: MainOptions) {
 	}
 
 	if (parsed.version) {
-		console.log(VERSION);
+		const hash = COMMIT_HASH ? ` (${COMMIT_HASH})` : "";
+		console.log(`${VERSION}${hash} (tfork)`);
 		process.exit(0);
 	}
 
