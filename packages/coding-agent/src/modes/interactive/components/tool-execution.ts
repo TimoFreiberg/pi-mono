@@ -33,7 +33,12 @@ export class ToolExecutionComponent extends Container {
 	private executionStarted = false;
 	private argsComplete = false;
 	private result?: {
-		content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+		content: Array<{
+			type: string;
+			text?: string;
+			data?: string;
+			mimeType?: string;
+		}>;
 		isError: boolean;
 		details?: any;
 	};
@@ -65,8 +70,8 @@ export class ToolExecutionComponent extends Container {
 		// Always create all shell variants. contentBox is used for default renderer-based composition.
 		// selfRenderContainer is used when the tool renders its own framing.
 		// contentText is reserved for generic fallback rendering when no tool definition exists.
-		this.contentBox = new Box(1, 1, (text: string) => theme.bg("toolPendingBg", text));
-		this.contentText = new Text("", 1, 1, (text: string) => theme.bg("toolPendingBg", text));
+		this.contentBox = new Box(1, 0, (text: string) => theme.bg("toolPendingBg", text));
+		this.contentText = new Text("", 1, 0, (text: string) => theme.bg("toolPendingBg", text));
 		this.selfRenderContainer = new Container();
 
 		if (this.hasRendererDefinition()) {
@@ -163,7 +168,12 @@ export class ToolExecutionComponent extends Container {
 
 	updateResult(
 		result: {
-			content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+			content: Array<{
+				type: string;
+				text?: string;
+				data?: string;
+				mimeType?: string;
+			}>;
 			details?: any;
 			isError: boolean;
 		},
@@ -269,7 +279,10 @@ export class ToolExecutionComponent extends Container {
 				} else {
 					try {
 						const component = resultRenderer(
-							{ content: this.result.content as any, details: this.result.details },
+							{
+								content: this.result.content as any,
+								details: this.result.details,
+							},
 							{ expanded: this.expanded, isPartial: this.isPartial },
 							theme,
 							this.getRenderContext(this.resultRendererComponent),
