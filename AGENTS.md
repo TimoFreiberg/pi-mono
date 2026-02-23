@@ -243,3 +243,33 @@ git pull --rebase && git push
 ### User override
 
 If the user instructions conflict with rules set out here, ask for confirmation that they want to override the rules. Only then execute their instructions.
+
+## Squashing Feature Commits
+
+When implementing a new feature across multiple changes, squash follow-up commits into the first commit that introduced the feature. This keeps the history clean with one commit per feature.
+
+### Workflow
+1. Make your first commit for the feature as usual
+2. For subsequent changes related to the same feature, squash them into the original commit:
+   ```bash
+   # Squash the current change into a specific prior commit
+   jj squash --into <change-id>
+
+   # Or squash specific files from the working copy into a prior commit
+   jj squash --into <change-id> <file-paths...>
+   ```
+3. Use `jj log` to find the change ID of the first feature commit
+4. After squashing, update the commit message if needed:
+   ```bash
+   jj describe <change-id> -m "feat(scope): full feature description"
+   ```
+
+### When to squash
+- Bug fixes for code introduced in the same feature
+- Addressing review feedback on the feature
+- Adding tests for the feature
+- Fixing lint/type errors from the feature
+
+### When NOT to squash
+- Changes unrelated to the feature
+- Independent refactors that happened to be done alongside the feature
