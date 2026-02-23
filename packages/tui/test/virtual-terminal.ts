@@ -1,5 +1,6 @@
 import type { Terminal as XtermTerminalType } from "@xterm/headless";
 import xterm from "@xterm/headless";
+import type { KeyId } from "../src/keys.js";
 import type { Terminal } from "../src/terminal.js";
 
 // Extract Terminal class from the module
@@ -36,7 +37,7 @@ export class VirtualTerminal implements Terminal {
 		this.xterm.write("\x1b[?2004h");
 	}
 
-	async drainInput(_maxMs?: number, _idleMs?: number): Promise<void> {
+	async drainInput(_maxMs?: number, _idleMs?: number, _awaitKeyRelease?: KeyId): Promise<void> {
 		// No-op for virtual terminal - no stdin to drain
 	}
 

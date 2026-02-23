@@ -3190,6 +3190,7 @@ export class InteractiveMode {
 	private handleCtrlC(): void {
 		const now = Date.now();
 		if (now - this.lastSigintTime < 500) {
+			this.shutdownKeyRelease = "ctrl+c";
 			void this.shutdown();
 		} else {
 			this.clearEditor();
@@ -3199,6 +3200,7 @@ export class InteractiveMode {
 
 	private handleCtrlD(): void {
 		// Only called when editor is empty (enforced by CustomEditor)
+		this.shutdownKeyRelease = "ctrl+d";
 		void this.shutdown();
 	}
 
@@ -3208,6 +3210,7 @@ export class InteractiveMode {
 	 * repaint the final frame while the process is exiting.
 	 */
 	private isShuttingDown = false;
+	private shutdownKeyRelease?: KeyId;
 
 	private async shutdown(): Promise<void> {
 		if (this.isShuttingDown) return;
@@ -3216,7 +3219,9 @@ export class InteractiveMode {
 
 		// Drain any in-flight Kitty key release events before stopping.
 		// This prevents escape sequences from leaking to the parent shell over slow SSH.
-		await this.ui.terminal.drainInput(1000);
+		// When we know which key triggered the exit, wait specifically for its release
+		// event instead of using idle-based detection (faster on high-latency connections).
+		await this.ui.terminal.drainInput(1000, 50, this.shutdownKeyRelease);
 
 		this.stop();
 		await this.runtimeHost.dispose();

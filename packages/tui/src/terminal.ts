@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as path from "node:path";
-import { setKittyProtocolActive } from "./keys.js";
+import { isKeyRelease, type KeyId, matchesKey, setKittyProtocolActive } from "./keys.js";
 import { StdinBuffer } from "./stdin-buffer.js";
 
 const cjsRequire = createRequire(import.meta.url);
@@ -25,8 +25,10 @@ export interface Terminal {
 	 * leaking to the parent shell over slow SSH connections.
 	 * @param maxMs - Maximum time to drain (default: 1000ms)
 	 * @param idleMs - Exit early if no input arrives within this time (default: 50ms)
+	 * @param awaitKeyRelease - If provided, wait specifically for this key's release event
+	 *   instead of using idle-based detection. Exits as soon as the release is seen.
 	 */
-	drainInput(maxMs?: number, idleMs?: number): Promise<void>;
+	drainInput(maxMs?: number, idleMs?: number, awaitKeyRelease?: KeyId): Promise<void>;
 
 	// Write output to terminal
 	write(data: string): void;
@@ -230,7 +232,37 @@ export class ProcessTerminal implements Terminal {
 		}
 	}
 
-	async drainInput(maxMs = 1000, idleMs = 50): Promise<void> {
+	async drainInput(maxMs = 1000, idleMs = 50, awaitKeyRelease?: KeyId): Promise<void> {
+		// If we have a specific key to wait for and Kitty is active, keep the
+		// protocol enabled so we can parse Kitty-encoded release events coming
+		// over the wire. Intercept stdinBuffer output to detect the release.
+		if (awaitKeyRelease && this._kittyProtocolActive) {
+			const previousHandler = this.inputHandler;
+			let releaseReceived = false;
+
+			this.inputHandler = (data: string) => {
+				if (isKeyRelease(data) && matchesKey(data, awaitKeyRelease)) {
+					releaseReceived = true;
+				}
+			};
+
+			const endTime = Date.now() + maxMs;
+			const pollMs = 5;
+			while (!releaseReceived) {
+				const timeLeft = endTime - Date.now();
+				if (timeLeft <= 0) break;
+				await new Promise((resolve) => setTimeout(resolve, Math.min(pollMs, timeLeft)));
+			}
+
+			this.inputHandler = previousHandler;
+
+			// Now disable Kitty protocol
+			process.stdout.write("\x1b[<u");
+			this._kittyProtocolActive = false;
+			setKittyProtocolActive(false);
+			return;
+		}
+
 		if (this._kittyProtocolActive) {
 			// Disable Kitty keyboard protocol first so any late key releases
 			// do not generate new Kitty escape sequences.
