@@ -881,15 +881,16 @@ function buildAdditionalModelRequestFields(
 	model: Model<"bedrock-converse-stream">,
 	options: BedrockOptions,
 ): Record<string, any> | undefined {
-	if (!options.reasoning || !model.reasoning) {
-		return undefined;
-	}
+	const isAnthropicClaude = isAnthropicClaudeModel(model);
 
-	if (isAnthropicClaudeModel(model)) {
+	let result: Record<string, any> | undefined;
+
+	// Build reasoning fields
+	if (options.reasoning && model.reasoning && isAnthropicClaude) {
 		// GovCloud Bedrock currently rejects the Claude thinking.display field.
 		// Omit it there until the GovCloud Converse schema catches up.
 		const display = isGovCloudBedrockTarget(model, options) ? undefined : (options.thinkingDisplay ?? "summarized");
-		const result: Record<string, any> = supportsAdaptiveThinking(model.id, model.name)
+		result = supportsAdaptiveThinking(model.id, model.name)
 			? {
 					thinking: { type: "adaptive", ...(display !== undefined ? { display } : {}) },
 					output_config: { effort: mapThinkingLevelToEffort(options.reasoning, model.id, model.name) },
@@ -919,11 +920,22 @@ function buildAdditionalModelRequestFields(
 		if (!supportsAdaptiveThinking(model.id, model.name) && (options.interleavedThinking ?? true)) {
 			result.anthropic_beta = ["interleaved-thinking-2025-05-14"];
 		}
-
-		return result;
 	}
 
-	return undefined;
+	// Inject context-1m beta for Anthropic Claude models with >200K context window.
+	// The Bedrock API requires the anthropic_beta flag to unlock the 1M context window.
+	if (isAnthropicClaude && model.contextWindow > 200000) {
+		const CONTEXT_1M_BETA = "context-1m-2025-08-07";
+		if (!result) {
+			result = {};
+		}
+		const existing: string[] = result.anthropic_beta ?? [];
+		if (!existing.includes(CONTEXT_1M_BETA)) {
+			result.anthropic_beta = [...existing, CONTEXT_1M_BETA];
+		}
+	}
+
+	return result;
 }
 
 function createImageBlock(mimeType: string, data: string) {
