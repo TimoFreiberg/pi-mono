@@ -1099,3 +1099,41 @@ export function extractSegments(
 
 	return { before, beforeWidth, after, afterWidth };
 }
+
+// URL regex: matches http(s) URLs that aren't already inside an OSC 8 sequence.
+// Captures common URL characters including path, query, fragment.
+// Excludes trailing punctuation that is likely sentence-level (period, comma, etc.)
+const URL_REGEX = /https?:\/\/[^\s<>"'\x1b]+[^\s<>"'.,;:!?\x1b)}\]]/g;
+
+/**
+ * Wrap plain-text URLs in OSC 8 hyperlink escape sequences.
+ *
+ * Scans text for URLs and wraps each in OSC 8 sequences. For text that
+ * already contains ANSI styling around URLs, use {@link hyperlink} instead.
+ *
+ * @param text - Plain text that may contain URLs
+ * @returns Text with URLs wrapped in OSC 8 sequences
+ */
+export function linkify(text: string): string {
+	// Don't process if text already contains OSC 8 sequences
+	if (text.includes("\x1b]8;")) {
+		return text;
+	}
+
+	return text.replace(URL_REGEX, (url) => `\x1b]8;;${url}\x07${url}\x1b]8;;\x07`);
+}
+
+/**
+ * Create an OSC 8 hyperlink escape sequence.
+ *
+ * Wraps displayText (which may contain ANSI styling) in an OSC 8 hyperlink
+ * pointing to the given URL. Terminals that support OSC 8 (Ghostty, iTerm2,
+ * WezTerm, kitty, etc.) render the text as a clickable link.
+ *
+ * @param url - Link target URL
+ * @param displayText - Visible text (may contain ANSI codes). Defaults to the URL.
+ * @returns Text wrapped in OSC 8 hyperlink sequences
+ */
+export function hyperlink(url: string, displayText?: string): string {
+	return `\x1b]8;;${url}\x07${displayText ?? url}\x1b]8;;\x07`;
+}

@@ -78,7 +78,6 @@ export {
 	getJpegDimensions,
 	getPngDimensions,
 	getWebpDimensions,
-	hyperlink,
 	type ImageDimensions,
 	type ImageProtocol,
 	type ImageRenderOptions,
@@ -103,4 +102,4 @@ export {
 	TUI,
 } from "./tui.js";
 // Utilities
-export { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "./utils.js";
+export { hyperlink, linkify, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "./utils.js";

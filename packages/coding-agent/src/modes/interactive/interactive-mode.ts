@@ -32,6 +32,7 @@ import {
 	type Component,
 	Container,
 	fuzzyFilter,
+	hyperlink,
 	Loader,
 	type LoaderIndicatorOptions,
 	Markdown,
@@ -3487,10 +3488,8 @@ export class InteractiveMode {
 	showNewVersionNotification(newVersion: string): void {
 		const action = theme.fg("accent", `${APP_NAME} update`);
 		const updateInstruction = theme.fg("muted", `New version ${newVersion} is available. Run `) + action;
-		const changelogUrl = theme.fg(
-			"accent",
-			"https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/CHANGELOG.md",
-		);
+		const rawUrl = "https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/CHANGELOG.md";
+		const changelogUrl = hyperlink(rawUrl, theme.fg("accent", rawUrl));
 		const changelogLine = theme.fg("muted", "Changelog: ") + changelogUrl;
 
 		this.chatContainer.addChild(new Spacer(1));
