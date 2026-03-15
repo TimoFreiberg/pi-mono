@@ -73,6 +73,7 @@ import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.j
 import { createCompactionSummaryMessage } from "../../core/messages.js";
 import { defaultModelPerProvider, findExactModelReferenceMatch, resolveModelScope } from "../../core/model-resolver.js";
 import { DefaultPackageManager } from "../../core/package-manager.js";
+import { appendPromptHistory, loadPromptHistory } from "../../core/prompt-history.js";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../../core/provider-display-names.js";
 import type { ResourceDiagnostic } from "../../core/resource-loader.js";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.js";
@@ -646,6 +647,9 @@ export class InteractiveMode {
 		// Render initial messages AFTER showing loaded resources
 		this.renderInitialMessages();
 
+		// Load persistent prompt history (adds older cross-session prompts after current session's)
+		this.loadPersistentHistory();
+
 		// Set up theme file watcher
 		onThemeChange(() => {
 			this.ui.invalidate();
@@ -660,6 +664,27 @@ export class InteractiveMode {
 
 		// Initialize available provider count for footer display
 		await this.updateAvailableProviderCount();
+	}
+
+	/**
+	 * Load persistent prompt history from disk and merge into the editor's
+	 * in-memory history. Iterates oldest-first so that addToHistory (which
+	 * does unshift) leaves the most recent prompt at index 0.
+	 */
+	private loadPersistentHistory(): void {
+		const persistedPrompts = loadPromptHistory();
+		for (let i = persistedPrompts.length - 1; i >= 0; i--) {
+			this.editor.addToHistory?.(persistedPrompts[i]);
+		}
+	}
+
+	/**
+	 * Record a prompt in both the editor's in-memory history and the persistent
+	 * cross-session history file.
+	 */
+	private recordPrompt(text: string): void {
+		this.editor.addToHistory?.(text);
+		appendPromptHistory(text);
 	}
 
 	/**
@@ -2566,7 +2591,7 @@ export class InteractiveMode {
 						this.editor.setText(text);
 						return;
 					}
-					this.editor.addToHistory?.(text);
+					this.recordPrompt(text);
 					await this.handleBashCommand(command, isExcluded);
 					this.isBashMode = false;
 					this.updateEditorBorderColor();
@@ -2577,7 +2602,7 @@ export class InteractiveMode {
 			// Queue input during compaction (extension commands execute immediately)
 			if (this.session.isCompacting) {
 				if (this.isExtensionCommand(text)) {
-					this.editor.addToHistory?.(text);
+					this.recordPrompt(text);
 					this.editor.setText("");
 					await this.session.prompt(text);
 				} else {
@@ -2589,7 +2614,7 @@ export class InteractiveMode {
 			// If streaming, use prompt() with steer behavior
 			// This handles extension commands (execute immediately), prompt template expansion, and queueing
 			if (this.session.isStreaming) {
-				this.editor.addToHistory?.(text);
+				this.recordPrompt(text);
 				this.editor.setText("");
 				await this.session.prompt(text, { streamingBehavior: "steer" });
 				this.updatePendingMessagesDisplay();
@@ -2604,7 +2629,7 @@ export class InteractiveMode {
 			if (this.onInputCallback) {
 				this.onInputCallback(text);
 			}
-			this.editor.addToHistory?.(text);
+			this.recordPrompt(text);
 		};
 	}
 
@@ -3306,7 +3331,7 @@ export class InteractiveMode {
 		// Queue input during compaction (extension commands execute immediately)
 		if (this.session.isCompacting) {
 			if (this.isExtensionCommand(text)) {
-				this.editor.addToHistory?.(text);
+				this.recordPrompt(text);
 				this.editor.setText("");
 				await this.session.prompt(text);
 			} else {
@@ -3318,7 +3343,7 @@ export class InteractiveMode {
 		// Alt+Enter queues a follow-up message (waits until agent finishes)
 		// This handles extension commands (execute immediately), prompt template expansion, and queueing
 		if (this.session.isStreaming) {
-			this.editor.addToHistory?.(text);
+			this.recordPrompt(text);
 			this.editor.setText("");
 			await this.session.prompt(text, { streamingBehavior: "followUp" });
 			this.updatePendingMessagesDisplay();
@@ -3601,7 +3626,7 @@ export class InteractiveMode {
 
 	private queueCompactionMessage(text: string, mode: "steer" | "followUp"): void {
 		this.compactionQueuedMessages.push({ text, mode });
-		this.editor.addToHistory?.(text);
+		this.recordPrompt(text);
 		this.editor.setText("");
 		this.updatePendingMessagesDisplay();
 		this.showStatus("Queued message for after compaction");
