@@ -81,6 +81,26 @@ function resolveBranchWithGitAsync(repoDir: string): Promise<string | null> {
 }
 
 /**
+ * Find the jj repo root by walking up from cwd looking for a .jj directory.
+ */
+function findJjRoot(cwd: string): string | null {
+	let dir = cwd;
+	while (true) {
+		const jjPath = join(dir, ".jj");
+		if (existsSync(jjPath)) {
+			try {
+				if (statSync(jjPath).isDirectory()) return dir;
+			} catch {
+				// ignore
+			}
+		}
+		const parent = dirname(dir);
+		if (parent === dir) return null;
+		dir = parent;
+	}
+}
+
+/**
  * Provides git branch and extension statuses - data not otherwise accessible to extensions.
  * Token stats, model info available via ctx.sessionManager and ctx.model.
  */
@@ -95,6 +115,8 @@ export class FooterDataProvider {
 	private reftableWatcher: FSWatcher | null = null;
 	private reftableTablesListWatcher: FSWatcher | null = null;
 	private reftableTablesListPath: string | null = null;
+	private jjWatcher: FSWatcher | null = null;
+	private jjRoot: string | null = null;
 	private branchChangeCallbacks = new Set<() => void>();
 	private availableProviderCount = 0;
 	private refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -105,15 +127,72 @@ export class FooterDataProvider {
 
 	constructor(cwd: string) {
 		this.cwd = cwd;
-		this.gitPaths = findGitPaths(cwd);
-		this.setupGitWatcher();
+		// Prefer jj over git in colocated repos: jj provides richer info (change ID, bookmarks)
+		// and the git backing store is an implementation detail in that case.
+		this.jjRoot = findJjRoot(cwd);
+		if (this.jjRoot) {
+			this.setupJjWatcher();
+		} else {
+			this.gitPaths = findGitPaths(cwd);
+			this.setupGitWatcher();
+		}
 	}
 
-	/** Current git branch, null if not in repo, "detached" if detached HEAD */
+	/** Current git/jj branch info, null if not in repo, "detached" if detached HEAD */
 	getGitBranch(): string | null {
-		if (this.cachedBranch === undefined) {
-			this.cachedBranch = this.resolveGitBranchSync();
+		if (this.cachedBranch !== undefined) return this.cachedBranch;
+
+		// jj repos: show change ID + bookmarks via `jj log`
+		if (this.jjRoot) {
+			try {
+				const spawnOpts = {
+					cwd: this.jjRoot,
+					timeout: 2000,
+					encoding: "utf8" as const,
+					stdio: ["ignore", "pipe", "ignore"] as ["ignore", "pipe", "ignore"],
+				};
+
+				// Get change ID and any bookmarks directly on @
+				const atTemplate = 'change_id.shortest() ++ if(bookmarks, " " ++ bookmarks.join(" "))';
+				const atResult = spawnSync(
+					"jj",
+					["log", "--no-graph", "--ignore-working-copy", "-r", "@", "-T", atTemplate],
+					spawnOpts,
+				);
+				let result = atResult.status === 0 ? atResult.stdout.trim() : "";
+
+				// If @ has no bookmarks, find the nearest ancestor with bookmarks
+				if (result && !result.includes(" ")) {
+					const ancestorResult = spawnSync(
+						"jj",
+						[
+							"log",
+							"--no-graph",
+							"--ignore-working-copy",
+							"--limit",
+							"1",
+							"-r",
+							"ancestors(@-) & bookmarks()",
+							"-T",
+							'bookmarks.join(" ")',
+						],
+						spawnOpts,
+					);
+					const ancestorBookmarks = ancestorResult.status === 0 ? ancestorResult.stdout.trim() : "";
+					if (ancestorBookmarks) {
+						result = `${result} ${ancestorBookmarks}`;
+					}
+				}
+
+				this.cachedBranch = result || null;
+			} catch {
+				this.cachedBranch = null;
+			}
+			return this.cachedBranch;
 		}
+
+		// Regular git repos
+		this.cachedBranch = this.resolveGitBranchSync();
 		return this.cachedBranch;
 	}
 
@@ -177,6 +256,10 @@ export class FooterDataProvider {
 			this.refreshTimer = null;
 		}
 		this.clearGitWatchers();
+		if (this.jjWatcher) {
+			this.jjWatcher.close();
+			this.jjWatcher = null;
+		}
 		this.branchChangeCallbacks.clear();
 	}
 
@@ -283,6 +366,23 @@ export class FooterDataProvider {
 	private handleGitWatcherError(): void {
 		this.clearGitWatchers();
 		this.scheduleGitWatcherRetry();
+	}
+
+	private setupJjWatcher(): void {
+		if (!this.jjRoot) return;
+
+		// Watch op_heads/heads/ - this directory changes on every jj operation
+		const opHeadsDir = join(this.jjRoot, ".jj", "repo", "op_heads", "heads");
+		if (!existsSync(opHeadsDir)) return;
+
+		try {
+			this.jjWatcher = watch(opHeadsDir, () => {
+				this.cachedBranch = undefined;
+				this.notifyBranchChange();
+			});
+		} catch {
+			// Silently fail if we can't watch
+		}
 	}
 
 	private setupGitWatcher(): void {
