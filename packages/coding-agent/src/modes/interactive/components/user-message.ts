@@ -1,9 +1,9 @@
 import { Box, Container, Markdown, type MarkdownTheme } from "@mariozechner/pi-tui";
 import { getMarkdownTheme, theme } from "../theme/theme.js";
 
-const OSC133_ZONE_START = "\x1b]133;A\x07";
-const OSC133_ZONE_END = "\x1b]133;B\x07";
-const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
+const OSC133_PROMPT_START = "\x1b]133;A\x07";
+const OSC133_PROMPT_END = "\x1b]133;B\x07";
+const OSC133_OUTPUT_END = "\x1b]133;D;0\x07";
 
 /**
  * Component that renders a user message
@@ -28,8 +28,8 @@ export class UserMessageComponent extends Container {
 			return lines;
 		}
 
-		lines[0] = OSC133_ZONE_START + lines[0];
-		lines[lines.length - 1] = OSC133_ZONE_END + OSC133_ZONE_FINAL + lines[lines.length - 1];
+		lines[0] = OSC133_OUTPUT_END + OSC133_PROMPT_START + lines[0];
+		lines[lines.length - 1] = lines[lines.length - 1] + OSC133_PROMPT_END;
 		return lines;
 	}
 }
