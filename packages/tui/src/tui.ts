@@ -914,11 +914,14 @@ export class TUI extends Container {
 
 		newLines = this.applyLineResets(newLines);
 
-		// Helper to clear scrollback and viewport and render all new lines
-		const fullRender = (clear: boolean): void => {
+		// Helper to clear viewport (and optionally scrollback) and render all new lines
+		const fullRender = (clear: boolean, clearScrollback = true): void => {
 			this.fullRedrawCount += 1;
 			let buffer = "\x1b[?2026h"; // Begin synchronized output
-			if (clear) buffer += "\x1b[2J\x1b[H\x1b[3J"; // Clear screen, home, then clear scrollback
+			if (clear) {
+				buffer += "\x1b[2J\x1b[H"; // Clear screen and home
+				if (clearScrollback) buffer += "\x1b[3J"; // Also clear scrollback
+			}
 			for (let i = 0; i < newLines.length; i++) {
 				if (i > 0) buffer += "\r\n";
 				buffer += newLines[i];
@@ -977,7 +980,7 @@ export class TUI extends Container {
 		// Configurable via setClearOnShrink() or PI_CLEAR_ON_SHRINK=0 env var
 		if (this.clearOnShrink && newLines.length < this.maxLinesRendered && this.overlayStack.length === 0) {
 			logRedraw(`clearOnShrink (maxLinesRendered=${this.maxLinesRendered})`);
-			fullRender(true);
+			fullRender(true, false);
 			return;
 		}
 
@@ -1032,7 +1035,7 @@ export class TUI extends Container {
 				const extraLines = this.previousLines.length - newLines.length;
 				if (extraLines > height) {
 					logRedraw(`extraLines > height (${extraLines} > ${height})`);
-					fullRender(true);
+					fullRender(true, false);
 					return;
 				}
 				if (extraLines > 0) {
@@ -1062,7 +1065,7 @@ export class TUI extends Container {
 		// If the first changed line is above the previous viewport, we need a full redraw.
 		if (firstChanged < prevViewportTop) {
 			logRedraw(`firstChanged < viewportTop (${firstChanged} < ${prevViewportTop})`);
-			fullRender(true);
+			fullRender(true, false);
 			return;
 		}
 
