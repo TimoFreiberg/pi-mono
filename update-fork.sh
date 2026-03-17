@@ -36,7 +36,7 @@ if [[ "$CONFLICT_COUNT" -gt 0 ]]; then
   echo ""
   echo "ERROR: Rebase introduced conflicts. Resolve them before continuing."
   echo "Conflicting commits:"
-  jj log -r 'fork:: & conflict()'
+  jj log -r 'fork:: & conflicts()'
   exit 1
 fi
 
