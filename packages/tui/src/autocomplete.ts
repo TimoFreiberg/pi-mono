@@ -91,22 +91,42 @@ function extractQuotedPrefix(text: string): string | null {
 	return text.slice(quoteStart);
 }
 
-function parsePathPrefix(prefix: string): { rawPrefix: string; isAtPrefix: boolean; isQuotedPrefix: boolean } {
+function parsePathPrefix(prefix: string): {
+	rawPrefix: string;
+	isAtPrefix: boolean;
+	isQuotedPrefix: boolean;
+} {
 	if (prefix.startsWith('@"')) {
-		return { rawPrefix: prefix.slice(2), isAtPrefix: true, isQuotedPrefix: true };
+		return {
+			rawPrefix: prefix.slice(2),
+			isAtPrefix: true,
+			isQuotedPrefix: true,
+		};
 	}
 	if (prefix.startsWith('"')) {
-		return { rawPrefix: prefix.slice(1), isAtPrefix: false, isQuotedPrefix: true };
+		return {
+			rawPrefix: prefix.slice(1),
+			isAtPrefix: false,
+			isQuotedPrefix: true,
+		};
 	}
 	if (prefix.startsWith("@")) {
-		return { rawPrefix: prefix.slice(1), isAtPrefix: true, isQuotedPrefix: false };
+		return {
+			rawPrefix: prefix.slice(1),
+			isAtPrefix: true,
+			isQuotedPrefix: false,
+		};
 	}
 	return { rawPrefix: prefix, isAtPrefix: false, isQuotedPrefix: false };
 }
 
 function buildCompletionValue(
 	path: string,
-	options: { isDirectory: boolean; isAtPrefix: boolean; isQuotedPrefix: boolean },
+	options: {
+		isDirectory: boolean;
+		isAtPrefix: boolean;
+		isQuotedPrefix: boolean;
+	},
 ): string {
 	const needsQuotes = options.isQuotedPrefix || path.includes(" ");
 	const prefix = options.isAtPrefix ? "@" : "";
@@ -127,6 +147,7 @@ async function walkDirectoryWithFd(
 	query: string,
 	maxResults: number,
 	signal: AbortSignal,
+	options?: { maxDepth?: number },
 ): Promise<Array<{ path: string; isDirectory: boolean }>> {
 	const args = [
 		"--base-directory",
@@ -151,6 +172,11 @@ async function walkDirectoryWithFd(
 		args.push("--full-path");
 	}
 
+	if (options?.maxDepth !== undefined) {
+		args.push("--max-depth", String(options.maxDepth));
+	}
+
+	// Add query as pattern if provided
 	if (query) {
 		args.push(buildFdPathQuery(query));
 	}
@@ -726,7 +752,10 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 			const scopedQuery = this.resolveScopedFuzzyQuery(query);
 			const fdBaseDir = scopedQuery?.baseDir ?? this.basePath;
 			const fdQuery = scopedQuery?.query ?? query;
-			const entries = await walkDirectoryWithFd(fdBaseDir, this.fdPath, fdQuery, 100, options.signal);
+			const isOutsideProject = !fdBaseDir.startsWith(this.basePath);
+			const entries = await walkDirectoryWithFd(fdBaseDir, this.fdPath, fdQuery, 100, options.signal, {
+				maxDepth: isOutsideProject ? 3 : undefined,
+			});
 			if (options.signal.aborted) {
 				return [];
 			}
