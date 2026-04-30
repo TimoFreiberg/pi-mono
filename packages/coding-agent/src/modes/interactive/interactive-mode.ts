@@ -110,6 +110,7 @@ import { keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.js";
 import { LoginDialogComponent } from "./components/login-dialog.js";
 import { ModelSelectorComponent } from "./components/model-selector.js";
 import { type AuthSelectorProvider, OAuthSelectorComponent } from "./components/oauth-selector.js";
+import { ReadGroupComponent } from "./components/read-group.js";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.js";
 import { SessionSelectorComponent } from "./components/session-selector.js";
 import { SettingsSelectorComponent } from "./components/settings-selector.js";
@@ -2732,7 +2733,7 @@ export class InteractiveMode {
 									this.sessionManager.getCwd(),
 								);
 								component.setExpanded(this.toolOutputExpanded);
-								this.chatContainer.addChild(component);
+								this.addToolComponentToChat(content.id, component);
 								this.pendingTools.set(content.id, component);
 							} else {
 								const component = this.pendingTools.get(content.id);
@@ -2801,7 +2802,7 @@ export class InteractiveMode {
 						this.sessionManager.getCwd(),
 					);
 					component.setExpanded(this.toolOutputExpanded);
-					this.chatContainer.addChild(component);
+					this.addToolComponentToChat(event.toolCallId, component);
 					this.pendingTools.set(event.toolCallId, component);
 				}
 				component.markExecutionStarted();
@@ -3012,6 +3013,34 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	/**
+	 * Add a tool execution component to the chat. For consecutive `read` tool
+	 * calls, fold them into a single ReadGroupComponent so the file paths show
+	 * as one packed block instead of one full Read result block per file.
+	 */
+	private addToolComponentToChat(toolCallId: string, component: ToolExecutionComponent): void {
+		if (component.getToolName() !== "read") {
+			this.chatContainer.addChild(component);
+			return;
+		}
+		const lastIdx = this.chatContainer.children.length - 1;
+		const last = lastIdx >= 0 ? this.chatContainer.children[lastIdx] : undefined;
+		if (last instanceof ReadGroupComponent) {
+			last.addEntry(toolCallId, component);
+			return;
+		}
+		if (last instanceof ToolExecutionComponent && last.getToolName() === "read") {
+			this.chatContainer.children.splice(lastIdx, 1);
+			const group = new ReadGroupComponent();
+			group.setExpanded(this.toolOutputExpanded);
+			group.addEntry(last.getToolCallId(), last);
+			group.addEntry(toolCallId, component);
+			this.chatContainer.addChild(group);
+			return;
+		}
+		this.chatContainer.addChild(component);
+	}
+
 	private addMessageToChat(message: AgentMessage, options?: { populateHistory?: boolean }): void {
 		switch (message.role) {
 			case "bashExecution": {
@@ -3141,7 +3170,7 @@ export class InteractiveMode {
 							this.sessionManager.getCwd(),
 						);
 						component.setExpanded(this.toolOutputExpanded);
-						this.chatContainer.addChild(component);
+						this.addToolComponentToChat(content.id, component);
 
 						if (message.stopReason === "aborted" || message.stopReason === "error") {
 							let errorMessage: string;

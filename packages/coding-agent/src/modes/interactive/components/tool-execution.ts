@@ -362,4 +362,20 @@ export class ToolExecutionComponent extends Container {
 		}
 		return text;
 	}
+
+	getArgs(): any {
+		return this.args;
+	}
+
+	getToolName(): string {
+		return this.toolName;
+	}
+
+	getToolCallId(): string {
+		return this.toolCallId;
+	}
+
+	hasError(): boolean {
+		return this.result?.isError ?? false;
+	}
 }
