@@ -86,6 +86,8 @@ export interface Settings {
 	branchSummary?: BranchSummarySettings;
 	retry?: RetrySettings;
 	hideThinkingBlock?: boolean;
+	/** @default "show" */
+	thinkingRenderMode?: "show" | "label" | "auto";
 	shellPath?: string; // Custom shell path (e.g., for Cygwin users on Windows)
 	quietStartup?: boolean;
 	shellCommandPrefix?: string; // Prefix prepended to every bash command (e.g., "shopt -s expand_aliases" for alias support)
@@ -741,6 +743,19 @@ export class SettingsManager {
 	setHideThinkingBlock(hide: boolean): void {
 		this.globalSettings.hideThinkingBlock = hide;
 		this.markModified("hideThinkingBlock");
+		this.save();
+	}
+
+	getThinkingRenderMode(): "show" | "label" | "auto" {
+		// Migrate from legacy hideThinkingBlock setting
+		const mode = this.settings.thinkingRenderMode;
+		if (mode) return mode;
+		return this.settings.hideThinkingBlock ? "label" : "show";
+	}
+
+	setThinkingRenderMode(mode: "show" | "label" | "auto"): void {
+		this.globalSettings.thinkingRenderMode = mode;
+		this.markModified("thinkingRenderMode");
 		this.save();
 	}
 

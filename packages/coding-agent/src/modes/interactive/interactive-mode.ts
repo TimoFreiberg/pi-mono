@@ -91,7 +91,7 @@ import { killTrackedDetachedChildren } from "../../utils/shell.js";
 import { ensureTool } from "../../utils/tools-manager.js";
 import { checkForNewPiVersion } from "../../utils/version-check.js";
 import { ArminComponent } from "./components/armin.js";
-import { AssistantMessageComponent } from "./components/assistant-message.js";
+import { AssistantMessageComponent, type ThinkingBlockRenderMode } from "./components/assistant-message.js";
 import { BashExecutionComponent } from "./components/bash-execution.js";
 import { BorderedLoader } from "./components/bordered-loader.js";
 import { BranchSummaryMessageComponent } from "./components/branch-summary-message.js";
@@ -265,8 +265,8 @@ export class InteractiveMode {
 	// Tool output expansion state
 	private toolOutputExpanded = false;
 
-	// Thinking block visibility state
-	private hideThinkingBlock = false;
+	// Thinking block render mode
+	private thinkingRenderMode: ThinkingBlockRenderMode = "show";
 
 	// Skill commands: command name -> skill file path
 	private skillCommands = new Map<string, string>();
@@ -373,7 +373,7 @@ export class InteractiveMode {
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
 
 		// Load hide thinking block setting
-		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
+		this.thinkingRenderMode = this.settingsManager.getThinkingRenderMode();
 
 		// Register themes from resource loader and initialize
 		setRegisteredThemes(this.session.resourceLoader.getThemes().themes);
@@ -1565,7 +1565,7 @@ export class InteractiveMode {
 		this.footer.setSession(this.session);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
 		this.footerDataProvider.setCwd(this.sessionManager.getCwd());
-		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
+		this.thinkingRenderMode = this.settingsManager.getThinkingRenderMode();
 		this.ui.setShowHardwareCursor(this.settingsManager.getShowHardwareCursor());
 		this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
 		const editorPaddingX = this.settingsManager.getEditorPaddingX();
@@ -1734,6 +1734,20 @@ export class InteractiveMode {
 	/**
 	 * Set an extension widget (string array or custom component).
 	 */
+	private setThinkingRenderMode(mode: ThinkingBlockRenderMode): void {
+		this.thinkingRenderMode = mode;
+		this.settingsManager.setThinkingRenderMode(mode);
+		for (const child of this.chatContainer.children) {
+			if (child instanceof AssistantMessageComponent) {
+				child.setThinkingRenderMode(mode);
+			}
+		}
+		if (this.streamingComponent && this.streamingMessage) {
+			this.streamingComponent.setThinkingRenderMode(mode);
+			this.streamingComponent.updateContent(this.streamingMessage);
+		}
+		this.ui.requestRender();
+	}
 	private setExtensionWidget(
 		key: string,
 		content: string[] | ((tui: TUI, thm: Theme) => Component & { dispose?(): void }) | undefined,
@@ -1970,6 +1984,7 @@ export class InteractiveMode {
 			setWorkingVisible: (visible) => this.setWorkingVisible(visible),
 			setWorkingIndicator: (options) => this.setWorkingIndicator(options),
 			setHiddenThinkingLabel: (label) => this.setHiddenThinkingLabel(label),
+			setThinkingRenderMode: (mode) => this.setThinkingRenderMode(mode),
 			setWidget: (key, content, options) => this.setExtensionWidget(key, content, options),
 			setFooter: (factory) => this.setExtensionFooter(factory),
 			setHeader: (factory) => this.setExtensionHeader(factory),
@@ -2701,7 +2716,7 @@ export class InteractiveMode {
 				} else if (event.message.role === "assistant") {
 					this.streamingComponent = new AssistantMessageComponent(
 						undefined,
-						this.hideThinkingBlock,
+						this.thinkingRenderMode,
 						this.getMarkdownThemeWithSettings(),
 						this.hiddenThinkingLabel,
 					);
@@ -3121,7 +3136,7 @@ export class InteractiveMode {
 			case "assistant": {
 				const assistantComponent = new AssistantMessageComponent(
 					message,
-					this.hideThinkingBlock,
+					this.thinkingRenderMode,
 					this.getMarkdownThemeWithSettings(),
 					this.hiddenThinkingLabel,
 				);
@@ -3458,21 +3473,24 @@ export class InteractiveMode {
 	}
 
 	private toggleThinkingBlockVisibility(): void {
-		this.hideThinkingBlock = !this.hideThinkingBlock;
-		this.settingsManager.setHideThinkingBlock(this.hideThinkingBlock);
+		// Cycle: show → label → auto → show
+		const cycle: ThinkingBlockRenderMode[] = ["show", "label", "auto"];
+		const currentIndex = cycle.indexOf(this.thinkingRenderMode);
+		const nextMode = currentIndex === -1 ? "show" : cycle[(currentIndex + 1) % cycle.length];
 
-		// Rebuild chat from session messages
+		// Update all existing components + save setting
+		this.setThinkingRenderMode(nextMode);
+
+		// Rebuild chat to refresh non-streaming messages with the new mode
 		this.chatContainer.clear();
 		this.rebuildChatFromMessages();
 
-		// If streaming, re-add the streaming component with updated visibility and re-render
-		if (this.streamingComponent && this.streamingMessage) {
-			this.streamingComponent.setHideThinkingBlock(this.hideThinkingBlock);
-			this.streamingComponent.updateContent(this.streamingMessage);
-			this.chatContainer.addChild(this.streamingComponent);
-		}
-
-		this.showStatus(`Thinking blocks: ${this.hideThinkingBlock ? "hidden" : "visible"}`);
+		const labels: Record<ThinkingBlockRenderMode, string> = {
+			show: "visible",
+			label: "labeled",
+			auto: "auto-hide",
+		};
+		this.showStatus(`Thinking blocks: ${labels[nextMode]}`);
 	}
 
 	private openExternalEditor(): void {
@@ -3800,7 +3818,7 @@ export class InteractiveMode {
 					availableThinkingLevels: this.session.getAvailableThinkingLevels(),
 					currentTheme: this.settingsManager.getTheme() || "dark",
 					availableThemes: getAvailableThemes(),
-					hideThinkingBlock: this.hideThinkingBlock,
+					thinkingRenderMode: this.thinkingRenderMode,
 					collapseChangelog: this.settingsManager.getCollapseChangelog(),
 					enableInstallTelemetry: this.settingsManager.getEnableInstallTelemetry(),
 					doubleEscapeAction: this.settingsManager.getDoubleEscapeAction(),
@@ -3874,12 +3892,12 @@ export class InteractiveMode {
 							this.ui.requestRender();
 						}
 					},
-					onHideThinkingBlockChange: (hidden) => {
-						this.hideThinkingBlock = hidden;
-						this.settingsManager.setHideThinkingBlock(hidden);
+					onThinkingRenderModeChange: (mode) => {
+						this.thinkingRenderMode = mode;
+						this.settingsManager.setThinkingRenderMode(mode);
 						for (const child of this.chatContainer.children) {
 							if (child instanceof AssistantMessageComponent) {
-								child.setHideThinkingBlock(hidden);
+								child.setThinkingRenderMode(mode);
 							}
 						}
 						this.chatContainer.clear();
@@ -4817,7 +4835,7 @@ export class InteractiveMode {
 				activeHeader.setExpanded(this.toolOutputExpanded);
 			}
 			setRegisteredThemes(this.session.resourceLoader.getThemes().themes);
-			this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
+			this.thinkingRenderMode = this.settingsManager.getThinkingRenderMode();
 			const themeName = this.settingsManager.getTheme();
 			const themeResult = themeName ? setTheme(themeName, true) : { success: true };
 			if (!themeResult.success) {

@@ -5,11 +5,23 @@ import { getMarkdownTheme, theme } from "../theme/theme.js";
 const OSC133_OUTPUT_START = "\x1b]133;C\x07";
 
 /**
+ * How thinking blocks are rendered in assistant messages.
+ *
+ * - `"show"`:  Render the full thinking content verbatim.
+ * - `"label"`: Replace thinking blocks with a static label ("Thinking...").
+ * - `"auto"`:  Show the label while only thinking blocks exist, then
+ *              remove them entirely once non-thinking content (text or
+ *              tool calls) arrives in the same message.  Useful during
+ *              streaming to keep the chat clean.
+ */
+export type ThinkingBlockRenderMode = "show" | "label" | "auto";
+
+/**
  * Component that renders a complete assistant message
  */
 export class AssistantMessageComponent extends Container {
 	private contentContainer: Container;
-	private hideThinkingBlock: boolean;
+	private thinkingRenderMode: ThinkingBlockRenderMode;
 	private markdownTheme: MarkdownTheme;
 	private hiddenThinkingLabel: string;
 	private lastMessage?: AssistantMessage;
@@ -17,13 +29,13 @@ export class AssistantMessageComponent extends Container {
 
 	constructor(
 		message?: AssistantMessage,
-		hideThinkingBlock = false,
+		thinkingRenderMode: ThinkingBlockRenderMode = "show",
 		markdownTheme: MarkdownTheme = getMarkdownTheme(),
 		hiddenThinkingLabel = "Thinking...",
 	) {
 		super();
 
-		this.hideThinkingBlock = hideThinkingBlock;
+		this.thinkingRenderMode = thinkingRenderMode;
 		this.markdownTheme = markdownTheme;
 		this.hiddenThinkingLabel = hiddenThinkingLabel;
 
@@ -43,11 +55,16 @@ export class AssistantMessageComponent extends Container {
 		}
 	}
 
-	setHideThinkingBlock(hide: boolean): void {
-		this.hideThinkingBlock = hide;
+	setThinkingRenderMode(mode: ThinkingBlockRenderMode): void {
+		this.thinkingRenderMode = mode;
 		if (this.lastMessage) {
 			this.updateContent(this.lastMessage);
 		}
+	}
+
+	/** @deprecated Use setThinkingRenderMode instead. */
+	setHideThinkingBlock(hide: boolean): void {
+		this.setThinkingRenderMode(hide ? "label" : "show");
 	}
 
 	setHiddenThinkingLabel(label: string): void {
@@ -66,15 +83,27 @@ export class AssistantMessageComponent extends Container {
 		return lines;
 	}
 
+	/**
+	 * Returns true when thinking blocks should be suppressed because the
+	 * message has non-thinking visible content (text or tool calls).
+	 */
+	private shouldSuppressThinking(message: AssistantMessage): boolean {
+		if (this.thinkingRenderMode !== "auto") return false;
+		return message.content.some((c) => (c.type === "text" && c.text.trim()) || c.type === "toolCall");
+	}
+
 	updateContent(message: AssistantMessage): void {
 		this.lastMessage = message;
 
 		// Clear content container
 		this.contentContainer.clear();
 
-		const hasVisibleContent = message.content.some(
-			(c) => (c.type === "text" && c.text.trim()) || (c.type === "thinking" && c.thinking.trim()),
-		);
+		const suppressThinking = this.shouldSuppressThinking(message);
+
+		const hasVisibleContent = message.content.some((c) => {
+			if (c.type === "thinking") return !suppressThinking && c.thinking.trim().length > 0;
+			return c.type === "text" && c.text.trim().length > 0;
+		});
 
 		if (hasVisibleContent) {
 			this.contentContainer.addChild(new Spacer(1));
@@ -88,13 +117,17 @@ export class AssistantMessageComponent extends Container {
 				// Set paddingY=0 to avoid extra spacing before tool executions
 				this.contentContainer.addChild(new Markdown(content.text.trim(), 1, 0, this.markdownTheme));
 			} else if (content.type === "thinking" && content.thinking.trim()) {
+				// In "auto" mode, skip thinking blocks entirely when non-thinking
+				// content (text or tool calls) has arrived.
+				if (suppressThinking) continue;
+
 				// Add spacing only when another visible assistant content block follows.
 				// This avoids a superfluous blank line before separately-rendered tool execution blocks.
 				const hasVisibleContentAfter = message.content
 					.slice(i + 1)
 					.some((c) => (c.type === "text" && c.text.trim()) || (c.type === "thinking" && c.thinking.trim()));
 
-				if (this.hideThinkingBlock) {
+				if (this.thinkingRenderMode === "label") {
 					// Show static thinking label when hidden
 					this.contentContainer.addChild(
 						new Text(theme.italic(theme.fg("thinkingText", this.hiddenThinkingLabel)), 1, 0),
@@ -103,6 +136,7 @@ export class AssistantMessageComponent extends Container {
 						this.contentContainer.addChild(new Spacer(1));
 					}
 				} else {
+					// "show" mode (or "auto" before content arrives)
 					// Thinking traces in thinkingText color, italic
 					this.contentContainer.addChild(
 						new Markdown(content.thinking.trim(), 1, 0, this.markdownTheme, {

@@ -43,7 +43,7 @@ export interface SettingsConfig {
 	availableThinkingLevels: ThinkingLevel[];
 	currentTheme: string;
 	availableThemes: string[];
-	hideThinkingBlock: boolean;
+	thinkingRenderMode: "show" | "label" | "auto";
 	collapseChangelog: boolean;
 	enableInstallTelemetry: boolean;
 	doubleEscapeAction: "fork" | "tree" | "none";
@@ -70,7 +70,7 @@ export interface SettingsCallbacks {
 	onThinkingLevelChange: (level: ThinkingLevel) => void;
 	onThemeChange: (theme: string) => void;
 	onThemePreview?: (theme: string) => void;
-	onHideThinkingBlockChange: (hidden: boolean) => void;
+	onThinkingRenderModeChange: (mode: "show" | "label" | "auto") => void;
 	onCollapseChangelogChange: (collapsed: boolean) => void;
 	onEnableInstallTelemetryChange: (enabled: boolean) => void;
 	onDoubleEscapeActionChange: (action: "fork" | "tree" | "none") => void;
@@ -239,10 +239,11 @@ export class SettingsSelectorComponent extends Container {
 			},
 			{
 				id: "hide-thinking",
-				label: "Hide thinking",
-				description: "Hide thinking blocks in assistant responses",
-				currentValue: config.hideThinkingBlock ? "true" : "false",
-				values: ["true", "false"],
+				label: "Thinking blocks",
+				description:
+					"Control display of thinking/reasoning traces\nshow  = show full content | label = replace with label | auto = show label, hide when content arrives",
+				currentValue: config.thinkingRenderMode,
+				values: ["show", "label", "auto"],
 			},
 			{
 				id: "collapse-changelog",
@@ -482,7 +483,7 @@ export class SettingsSelectorComponent extends Container {
 						callbacks.onTransportChange(newValue as Transport);
 						break;
 					case "hide-thinking":
-						callbacks.onHideThinkingBlockChange(newValue === "true");
+						callbacks.onThinkingRenderModeChange(newValue as "show" | "label" | "auto");
 						break;
 					case "collapse-changelog":
 						callbacks.onCollapseChangelogChange(newValue === "true");

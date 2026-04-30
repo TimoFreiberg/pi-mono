@@ -185,6 +185,10 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			// Hidden thinking label not supported in RPC mode - requires TUI message rendering access
 		},
 
+		setThinkingRenderMode(_mode: "show" | "label" | "auto"): void {
+			// Thinking render mode not supported in RPC mode - requires TUI message rendering access
+		},
+
 		setWidget(key: string, content: unknown, options?: ExtensionWidgetOptions): void {
 			// Only support string arrays in RPC mode - factory functions are ignored
 			if (content === undefined || Array.isArray(content)) {

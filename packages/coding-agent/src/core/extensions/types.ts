@@ -40,6 +40,7 @@ import type {
 	TUI,
 } from "@mariozechner/pi-tui";
 import type { Static, TSchema } from "typebox";
+import type { ThinkingBlockRenderMode } from "../../modes/interactive/components/assistant-message.js";
 import type { Theme } from "../../modes/interactive/theme/theme.js";
 import type { BashResult } from "../bash-executor.js";
 import type { CompactionPreparation, CompactionResult } from "../compaction/index.js";
@@ -158,6 +159,9 @@ export interface ExtensionUIContext {
 
 	/** Set the label shown for hidden thinking blocks. Call with no argument to restore default. */
 	setHiddenThinkingLabel(label?: string): void;
+
+	/** Set how thinking blocks are rendered: "show" (full), "label" (single line), "auto" (hide when content arrives). */
+	setThinkingRenderMode(mode: ThinkingBlockRenderMode): void;
 
 	/** Set a widget to display above or below the editor. Accepts string array or component factory. */
 	setWidget(key: string, content: string[] | undefined, options?: ExtensionWidgetOptions): void;
