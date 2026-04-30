@@ -102,6 +102,7 @@ import { CustomMessageComponent } from "./components/custom-message.js";
 import { DaxnutsComponent } from "./components/daxnuts.js";
 import { DynamicBorder } from "./components/dynamic-border.js";
 import { EarendilAnnouncementComponent } from "./components/earendil-announcement.js";
+import { ExploreGroupComponent, isExploreToolName } from "./components/explore-group.js";
 import { ExtensionEditorComponent } from "./components/extension-editor.js";
 import { ExtensionInputComponent } from "./components/extension-input.js";
 import { ExtensionSelectorComponent } from "./components/extension-selector.js";
@@ -110,7 +111,6 @@ import { keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.js";
 import { LoginDialogComponent } from "./components/login-dialog.js";
 import { ModelSelectorComponent } from "./components/model-selector.js";
 import { type AuthSelectorProvider, OAuthSelectorComponent } from "./components/oauth-selector.js";
-import { ReadGroupComponent } from "./components/read-group.js";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.js";
 import { SessionSelectorComponent } from "./components/session-selector.js";
 import { SettingsSelectorComponent } from "./components/settings-selector.js";
@@ -3014,29 +3014,34 @@ export class InteractiveMode {
 	}
 
 	/**
-	 * Add a tool execution component to the chat. For consecutive `read` tool
-	 * calls, fold them into a single ReadGroupComponent so the file paths show
-	 * as one packed block instead of one full Read result block per file.
+	 * Add a tool execution component to the chat. For consecutive read/grep/find
+	 * tool calls, fold them into a single ExploreGroupComponent that renders as
+	 * a one-line "Searched for N patterns, read M files" summary instead of one
+	 * full result block per call.
 	 */
 	private addToolComponentToChat(toolCallId: string, component: ToolExecutionComponent): void {
-		if (component.getToolName() !== "read") {
+		const toolName = component.getToolName();
+		if (!isExploreToolName(toolName)) {
 			this.chatContainer.addChild(component);
 			return;
 		}
 		const lastIdx = this.chatContainer.children.length - 1;
 		const last = lastIdx >= 0 ? this.chatContainer.children[lastIdx] : undefined;
-		if (last instanceof ReadGroupComponent) {
-			last.addEntry(toolCallId, component);
+		if (last instanceof ExploreGroupComponent) {
+			last.addEntry(toolCallId, toolName, component);
 			return;
 		}
-		if (last instanceof ToolExecutionComponent && last.getToolName() === "read") {
-			this.chatContainer.children.splice(lastIdx, 1);
-			const group = new ReadGroupComponent();
-			group.setExpanded(this.toolOutputExpanded);
-			group.addEntry(last.getToolCallId(), last);
-			group.addEntry(toolCallId, component);
-			this.chatContainer.addChild(group);
-			return;
+		if (last instanceof ToolExecutionComponent) {
+			const lastTool = last.getToolName();
+			if (isExploreToolName(lastTool)) {
+				this.chatContainer.children.splice(lastIdx, 1);
+				const group = new ExploreGroupComponent();
+				group.setExpanded(this.toolOutputExpanded);
+				group.addEntry(last.getToolCallId(), lastTool, last);
+				group.addEntry(toolCallId, toolName, component);
+				this.chatContainer.addChild(group);
+				return;
+			}
 		}
 		this.chatContainer.addChild(component);
 	}
